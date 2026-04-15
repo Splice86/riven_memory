@@ -1,0 +1,21 @@
+# Memory API Requirements
+
+# Web server
+fastapi          # FastAPI web framework
+uvicorn          # ASGI server
+
+# Data processing
+numpy            # Numerical operations, array handling
+
+# ML / Embeddings
+torch            # PyTorch for ML models
+sentence-transformers  # Text embeddings
+
+# Token counting
+tiktoken         # OpenAI tokenizer for counting tokens
+
+# Configuration
+pyyaml           # YAML config file parsing
+
+# LLM client
+openai           # OpenAI-compatible API client (for LLM summarization)

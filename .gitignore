@@ -1,0 +1,29 @@
+# Environment / secrets
+secrets.yaml
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Test / dev
+.pytest_cache/
+.tox/
+.venv/
+venv/
+.env/
+
+# Local DB files (created at runtime)
+memory/database/
+*.db
+
+# IDE
+.vscode/
+.idea/
+*.swp

@@ -1,0 +1,7 @@
+"""Entry point for `python -m memory`."""
+
+import uvicorn
+
+from memory import app
+
+uvicorn.run(app, host="0.0.0.0", port=8030, reload=True)
