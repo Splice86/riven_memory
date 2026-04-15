@@ -12,11 +12,11 @@ from context import Context
 import numpy as np
 
 # Config (layered: config.yaml < secrets_template.yaml < env vars)
-import riven_memory_config as cfg
+import config as cfg
 
 # Database settings
 DB_DIR = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     cfg.get('database.db_dir', 'database')
 )
 os.makedirs(DB_DIR, exist_ok=True)

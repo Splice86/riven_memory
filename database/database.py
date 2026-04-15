@@ -177,7 +177,7 @@ class MemoryDB:
         
         See search.py for DSL documentation.
         """
-        from search import MemorySearcher
+        from .search import MemorySearcher
         searcher = MemorySearcher(self.db_path, self.embedding)
         return searcher.search(query_string, limit)
 

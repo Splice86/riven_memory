@@ -19,6 +19,14 @@ import sys
 import argparse
 from datetime import datetime, timedelta, timezone
 
+# Ensure the project layout is importable (root for database/, src/ for other modules)
+_root = os.path.dirname(os.path.abspath(__file__))
+if _root not in sys.path:
+    sys.path.insert(0, _root)
+_src = os.path.join(_root, "src")
+if _src not in sys.path:
+    sys.path.insert(1, _src)
+
 TEST_DB = "test_comprehensive.db"
 
 # Test data setup

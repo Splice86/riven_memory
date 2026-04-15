@@ -26,6 +26,4 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-# py_modules = files at root (no .py extension)
-# __init__ must be listed so the root dir is importable as a package
-py-modules = ["__init__", "api", "context", "database", "embedding", "search", "server", "riven_memory_config"]
+packages = ["src"]

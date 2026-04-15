@@ -2,12 +2,14 @@
 
 Precedence (highest wins):
     1. Env var (RV_* prefix, __ for nesting: RV_LLM__API_KEY)
-    2. secrets_template.yaml / secrets.yaml  (gitignored, user secrets)
-    3. config.yaml  (committed defaults)
+    2. Non-template YAML (secrets.yaml, config.yaml)  (user overrides)
+    3. Template YAML (secrets_template.yaml)         (fallback if no user file)
+    4. Hardcoded default passed to get()
 
-The simplest approach: put non-sensitive defaults in config.yaml,
-sensitive values (api keys, urls) in secrets_template.yaml (which becomes
-secrets.yaml in a gitignored local override).
+Template convention:
+    If <name>_template.yaml exists, it serves as fallback.
+    If <name>.yaml exists (without _template), it wins.
+    Example: secrets_template.yaml → check secrets.yaml first, fallback to template.
 """
 
 import os
@@ -16,8 +18,8 @@ import yaml
 
 
 def _find_memory_root() -> str:
-    """Find the riven-memory project root."""
-    return os.path.dirname(os.path.abspath(__file__))
+    """Find the riven-memory project root (two levels up from src/)."""
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def _load_yaml(path: str) -> dict:
@@ -94,15 +96,21 @@ def _load():
     if _loaded:
         return
     root = _find_memory_root()
-    config_path = os.path.join(root, "config.yaml")
-    secrets_template = os.path.join(root, "secrets_template.yaml")
 
     merged = {}
-    # config.yaml first (lowest precedence)
+    # Template YAMLs first (lowest precedence - fallback only)
+    secrets_template = os.path.join(root, "secrets_template.yaml")
+    merged = _deep_merge(merged, _load_yaml(secrets_template))
+    
+    # Non-template YAMLs override templates
+    config_path = os.path.join(root, "config.yaml")
     merged = _deep_merge(merged, _load_yaml(config_path))
-    # secrets override config
-    merged = _deep_merge(merged, _load_yaml(_resolve_template(secrets_template)))
-    # env vars override everything
+    
+    # User secrets.yaml overrides both (if it exists)
+    secrets_path = os.path.join(root, "secrets.yaml")
+    merged = _deep_merge(merged, _load_yaml(secrets_path))
+    
+    # Env vars override everything (highest precedence)
     merged = _env_override(merged)
 
     _merged = merged
@@ -120,3 +128,11 @@ def get(key: str, default=None):
         else:
             return default
     return current
+
+
+def reload():
+    """Reload all config files (useful after changing env vars or yaml files)."""
+    global _merged, _loaded
+    _loaded = False
+    _merged = {}
+    _load()

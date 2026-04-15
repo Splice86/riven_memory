@@ -848,19 +848,21 @@ class SearchParser:
                         target = potential_target
             
             # Determine which direction to check
-            # l:source:ID means "find memories that ID links TO" (targets)
-            # l:target:ID means "find memories that link TO ID" (sources)
+            # l:source:X - find memories that are the SOURCE of an X link (they link TO others)
+            # l:target:X - find memories that are the TARGET of an X link (others link TO them)
             if direction == 'source':
-                # Find memories that the specified ID links TO (targets of links where source_id = ID)
-                direction_check = "ml.target_id = m.id"
+                # Find memories that are the source of this link type (ml.source_id = m.id)
+                direction_check = "ml.source_id = m.id"
                 id_column = "source_id"
             elif direction == 'target':
-                # Find memories that link TO the specified ID (sources of links where target_id = ID)
-                direction_check = "ml.source_id = m.id"
+                # Find memories that are the target of this link type (ml.target_id = m.id)
+                direction_check = "ml.target_id = m.id"
                 id_column = "target_id"
             elif target:
-                # Has target but no direction - default to target direction
+                # Has target but no direction - default to source direction
                 # l:summary_of:123 means "find memories that memory 123 links to via summary_of"
+                # (memory 123 is the source, we want its targets)
+                # direction_check: check if current memory m is the SOURCE of the link
                 direction_check = "ml.source_id = m.id"
                 id_column = "target_id"
             else:
@@ -880,10 +882,17 @@ class SearchParser:
                 # Fix the inner query to use m_inner for the target memory
                 inner_sql_fixed = inner_sql.replace('m.id', 'm_inner.id')
                 
-                # For source direction, we join on target; for target, we join on source
-                if direction == 'source':
+                # For source direction: m is the source, m_inner is the target (OTHER memory in link)
+                # For target direction: m is the target, m_inner is the source (OTHER memory in link)
+                # For bidirectional (direction=None), check both
+                if direction is None:
+                    # Bidirectional: check both sides of the link
+                    target_join = "(ml.source_id = m_inner.id OR ml.target_id = m_inner.id)"
+                elif direction == 'source':
+                    # m is the source, so m_inner should be the target
                     target_join = "ml.target_id = m_inner.id"
                 else:
+                    # m is the target, so m_inner should be the source
                     target_join = "ml.source_id = m_inner.id"
                 
                 sql = f"""EXISTS (
