@@ -7,8 +7,8 @@ from typing import Optional
 from datetime import datetime, timezone
 
 
-from riven_memory.database import MemoryDB, init_db
-from riven_memory.context import Context
+from database import MemoryDB, init_db
+from context import Context
 import numpy as np
 
 # Config (layered: config.yaml < secrets_template.yaml < env vars)

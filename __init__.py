@@ -1,13 +1,13 @@
 """Riven Memory API server package.
 
 Run with:
-    uvicorn memory:app --reload --port 8030
-    python -m memory
+    uvicorn __init__:app --reload --port 8030
+    python -m __main__
 """
 
 import os
 
-from riven_memory.api import app
+from api import app
 
 # Config path resolution (works from project root when memory is a package)
 _module_dir = os.path.dirname(os.path.abspath(__file__))

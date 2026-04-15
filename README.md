@@ -24,9 +24,11 @@ export RV_LLM__URL=http://127.0.0.1:8010
 export RV_LLM__API_KEY=sk-your-key
 
 # Run the server
-python -m riven_memory
+python server.py
 # or
-uvicorn riven_memory:app --reload --port 8030
+uvicorn __init__:app --reload --port 8030
+# or (after pip install)
+riven-memory
 ```
 
 The server starts on **http://localhost:8030**. API docs at **http://localhost:8030/docs**.
@@ -86,16 +88,15 @@ d:last 30 days AND k:important
 ## Architecture
 
 ```
-riven_memory/            <- the package
-  api.py        - FastAPI endpoints
-  database.py   - SQLite + vector storage
-  context.py    - Temporal clustering + summarization
-  embedding.py  - Sentence transformer embeddings
-  search.py     - Query DSL parser + search engine
-  config.yaml   - Committed defaults
-  __init__.py
-  __main__.py   - python -m riven_memory entry point
-riven_memory_config.py  - layered config loader (shared by all modules)
+__init__.py      - package init, exports the FastAPI app
+api.py           - FastAPI endpoints + request/response models
+context.py       - Temporal clustering + LLM summarization
+database.py      - SQLite + vector storage
+embedding.py     - Sentence transformer embeddings + cache
+search.py        - Query DSL parser + search engine
+server.py        - Entry point: uvicorn runner
+config.yaml      - Committed defaults (db paths, model size, etc.)
+riven_memory_config.py  - layered config loader (all modules share this)
 ```
 
 Riven agents connect to it via HTTP (default: `http://127.0.0.1:8030`). Configure the URL via `RV_MEMORY_API__URL` or in the Riven config.
