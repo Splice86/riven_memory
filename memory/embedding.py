@@ -2,19 +2,13 @@
 
 import os
 import sqlite3
-import yaml
 import numpy as np
 import torch
 from sentence_transformers import SentenceTransformer
 from typing import Optional
 
-# Load config
-CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.yaml")
-try:
-    with open(CONFIG_PATH) as f:
-        CONFIG = yaml.safe_load(f) or {}
-except Exception:
-    CONFIG = {}
+# Shared layered config (config.yaml < secrets < env vars)
+import memory_config as cfg
 
 # HuggingFace token for faster downloads and higher rate limits
 HF_TOKEN = os.environ.get("HF_TOKEN", None)
@@ -36,13 +30,14 @@ MODELS = {
 }
 
 # Model settings from config (defaults)
-DEFAULT_MODEL_SIZE = CONFIG.get('embedding', {}).get('model_size', '270m')
-FORCE_CPU = CONFIG.get('embedding', {}).get('force_cpu', True)
+DEFAULT_MODEL_SIZE = cfg.get('embedding.model_size', '270m')
+FORCE_CPU = cfg.get('embedding.force_cpu', True)
 
-# Cache settings from config
-CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), CONFIG.get('cache', {}).get('cache_dir', 'database'))
+# Cache settings from config (paths resolved relative to this file)
+_CACHE_DIR_DEFAULT = cfg.get('cache.cache_dir', 'database')
+CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), _CACHE_DIR_DEFAULT)
 os.makedirs(CACHE_DIR, exist_ok=True)
-DEFAULT_CACHE_DB = os.path.join(CACHE_DIR, CONFIG.get('cache', {}).get('cache_db', 'embeddings_cache.db'))
+DEFAULT_CACHE_DB = os.path.join(CACHE_DIR, cfg.get('cache.cache_db', 'embeddings_cache.db'))
 
 
 class EmbeddingModel:

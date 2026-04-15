@@ -7,9 +7,11 @@ Single Context class that handles:
 """
 
 import os
-import yaml
 from datetime import datetime, timezone
 from typing import Optional
+
+# Shared layered config (config.yaml < secrets < env vars)
+import memory_config as cfg
 
 # Try to import tiktoken for token counting
 try:
@@ -27,25 +29,14 @@ except ImportError:
 
 
 # ============================================================================
-# Config
+# Config (derived from shared memory_config)
 # ============================================================================
 
-
-# Load config
-CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.yaml")
-try:
-    with open(CONFIG_PATH) as f:
-        CONFIG = yaml.safe_load(f) or {}
-except Exception:
-    CONFIG = {}
-
-llm_config = CONFIG.get('llm', {})
-LLM_URL = os.environ.get("LLM_URL", llm_config.get('url', "http://127.0.0.1:8000/v1/"))
-LLM_API_KEY = os.environ.get("LLM_API_KEY", llm_config.get('api_key', "sk-dummy"))
-LLM_MODEL = os.environ.get("LLM_MODEL", llm_config.get('model', "nvidia/MiniMax-M2.5-NVFP4"))
-
-MAX_TOKENS_DEFAULT = 32000
-MIN_CLUSTER_SIZE = 3
+LLM_URL = cfg.get('llm.url', 'http://127.0.0.1:8000/v1/')
+LLM_API_KEY = cfg.get('llm.api_key', 'sk-dummy')
+LLM_MODEL = cfg.get('llm.model', 'nvidia/MiniMax-M2.5-NVFP4')
+MAX_TOKENS_DEFAULT = cfg.get('context.max_tokens', 32000)
+MIN_CLUSTER_SIZE = cfg.get('context.min_cluster_size', 3)
 
 
 # ============================================================================
