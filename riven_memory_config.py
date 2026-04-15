@@ -94,7 +94,7 @@ def _load():
     if _loaded:
         return
     root = _find_memory_root()
-    config_path = os.path.join(root, "memory", "config.yaml")
+    config_path = os.path.join(root, "riven_memory", "config.yaml")
     secrets_template = os.path.join(root, "secrets_template.yaml")
 
     merged = {}

@@ -7,12 +7,12 @@ from typing import Optional
 from datetime import datetime, timezone
 
 
-from memory.database import MemoryDB, init_db
-from memory.context import Context
+from riven_memory.database import MemoryDB, init_db
+from riven_memory.context import Context
 import numpy as np
 
 # Config (layered: config.yaml < secrets_template.yaml < env vars)
-import memory_config as cfg
+import riven_memory_config as cfg
 
 # Database settings
 DB_DIR = os.path.join(

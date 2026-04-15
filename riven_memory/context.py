@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 # Shared layered config (config.yaml < secrets < env vars)
-import memory_config as cfg
+import riven_memory_config as cfg
 
 # Try to import tiktoken for token counting
 try:

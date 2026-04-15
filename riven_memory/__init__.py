@@ -7,7 +7,7 @@ Run with:
 
 import os
 
-from memory.api import app
+from riven_memory.api import app
 
 # Config path resolution (works from project root when memory is a package)
 _module_dir = os.path.dirname(os.path.abspath(__file__))

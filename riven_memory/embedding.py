@@ -8,7 +8,7 @@ from sentence_transformers import SentenceTransformer
 from typing import Optional
 
 # Shared layered config (config.yaml < secrets < env vars)
-import memory_config as cfg
+import riven_memory_config as cfg
 
 # HuggingFace token for faster downloads and higher rate limits
 HF_TOKEN = os.environ.get("HF_TOKEN", None)

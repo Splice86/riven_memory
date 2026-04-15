@@ -24,12 +24,18 @@ export RV_LLM__URL=http://127.0.0.1:8010
 export RV_LLM__API_KEY=sk-your-key
 
 # Run the server
-python -m memory
+python -m riven_memory
 # or
-uvicorn memory:app --reload --port 8030
+uvicorn riven_memory:app --reload --port 8030
 ```
 
 The server starts on **http://localhost:8030**. API docs at **http://localhost:8030/docs**.
+
+## As a pip dependency
+
+```bash
+pip install riven-memory
+```
 
 ## Config precedence
 
@@ -80,19 +86,16 @@ d:last 30 days AND k:important
 ## Architecture
 
 ```
-memory/
+riven_memory/            <- the package
   api.py        - FastAPI endpoints
   database.py   - SQLite + vector storage
   context.py    - Temporal clustering + summarization
   embedding.py  - Sentence transformer embeddings
   search.py     - Query DSL parser + search engine
   config.yaml   - Committed defaults
-```
-
-## As a dependency
-
-```bash
-pip install riven-memory
+  __init__.py
+  __main__.py   - python -m riven_memory entry point
+riven_memory_config.py  - layered config loader (shared by all modules)
 ```
 
 Riven agents connect to it via HTTP (default: `http://127.0.0.1:8030`). Configure the URL via `RV_MEMORY_API__URL` or in the Riven config.
