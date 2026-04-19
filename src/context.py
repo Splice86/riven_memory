@@ -139,7 +139,8 @@ class Context:
         self.max_tokens = max_tokens
         self.min_cluster_size = min_cluster_size
     
-    def add(self, role: str, text: str, created_at: str = None, session: str = None) -> dict:
+    def add(self, role: str, text: str, created_at: str = None, session: str = None, 
+            tool_call_id: str = None, function: str = None) -> dict:
         """
         Add a context message.
         
@@ -150,6 +151,8 @@ class Context:
             text: Message content
             created_at: Optional timestamp (ISO format)
             session: Optional session ID to group memories (stored as property)
+            tool_call_id: Optional tool call ID for tracing tool responses to their requests
+            function: Optional function name for tool results
             
         Returns:
             Dict with id, role, token_count, created_at, and summarization result
@@ -162,14 +165,21 @@ class Context:
         
         token_count = count_message_tokens(role, text)
         
+        # Build properties including tool_call_id and function if provided
+        properties = {
+            "role": role,
+            "node_type": "context",
+            "token_count": str(token_count)
+        }
+        if tool_call_id:
+            properties["tool_call_id"] = tool_call_id
+        if function:
+            properties["function"] = function
+        
         memory_id = self.db.add_memory(
             content=text,
             keywords=["context", role],
-            properties={
-                "role": role,
-                "node_type": "context",
-                "token_count": str(token_count)
-            },
+            properties=properties,
             created_at=created_at,
             session=session
         )
@@ -216,12 +226,19 @@ class Context:
             })
         
         for mem in unsummarized:
-            context.append({
+            ctx_item = {
                 "id": mem["id"],
                 "role": mem["role"],
                 "content": mem["content"],
                 "created_at": mem["created_at"]
-            })
+            }
+            # Include tool_call_id if present
+            if "tool_call_id" in mem.get("properties", {}):
+                ctx_item["tool_call_id"] = mem["properties"]["tool_call_id"]
+            # Include function if present (for tool results)
+            if "function" in mem.get("properties", {}):
+                ctx_item["function"] = mem["properties"]["function"]
+            context.append(ctx_item)
         
         return context
     
@@ -390,7 +407,7 @@ class Context:
                 "role": props.get("role", "unknown"),
                 "content": mem["content"],
                 "created_at": mem["created_at"],
-                "properties": {"token_count": props.get("token_count", "0")}
+                "properties": props  # Include full properties including tool_call_id
             })
         
         unsummarized.sort(key=lambda m: m["created_at"])

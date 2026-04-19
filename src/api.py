@@ -85,6 +85,8 @@ class AddContextRequest(BaseModel):
     role: str  # "user", "assistant", "system", "tool"
     created_at: str | None = None  # Optional timestamp
     session: str | None = None  # Optional session ID (stored as property)
+    tool_call_id: str | None = None  # Optional tool call ID for tracing
+    function: str | None = None  # Optional function name for tool results
 
 
 
@@ -229,7 +231,7 @@ async def add_context(
     """
     db = get_db()
     ctx = Context(db, max_tokens=max_tokens or 32000, min_cluster_size=min_cluster_size or 3)
-    result = ctx.add(request.role, request.content, request.created_at, request.session)
+    result = ctx.add(request.role, request.content, request.created_at, request.session, request.tool_call_id, request.function)
     
     return result
 
