@@ -1,7 +1,7 @@
 """Memory API server - FastAPI endpoints for memory storage and search."""
 
 import os
-from fastapi import FastAPI, HTTPException, Query, Depends
+from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timezone
@@ -33,25 +33,13 @@ app = FastAPI(title="Riven Memory API")
 # Default DB name - read from config like the rest of the app
 DEFAULT_DB = cfg.get('database.default_db', 'riven.db')
 
-def get_db_path(db_name: str) -> str:
-    """Get full path for a DB file."""
-    if not db_name:
-        db_name = DEFAULT_DB
+def get_db_path() -> str:
+    """Get full path for the DB file."""
+    db_name = DEFAULT_DB
     # Only append .db if not already present
     if not db_name.endswith(".db"):
         db_name = f"{db_name}.db"
     return os.path.join(DB_DIR, db_name)
-
-
-def get_or_create_db(db_name: str) -> MemoryDB:
-    """Get or create a database instance."""
-    db_path = get_db_path(db_name)
-    init_db(db_path)
-    return MemoryDB(db_path=db_path)
-
-
-# Cache for DB instances (per process)
-_db_cache: dict[str, MemoryDB] = {}
 
 
 class AddMemoryRequest(BaseModel):
@@ -106,51 +94,25 @@ class GetContextRequest(BaseModel):
     session: str | None = None  # Optional session ID to filter by
 
 
-# Database dependency - gets DB from query param
-def get_db(db_name: str = Query(DEFAULT_DB, description="Database name")) -> MemoryDB:
-    """Get or create a database instance for the requested DB name.
-    
-    Auto-creates the database if it doesn't exist.
-    """
-    if db_name not in _db_cache:
-        _db_cache[db_name] = get_or_create_db(db_name)
-    return _db_cache[db_name]
+# Database singleton - no more db_name selection
+_db_instance: MemoryDB | None = None
 
 
-@app.post("/db/create")
-async def create_database(name: str = Query(..., description="Database name to create")) -> dict:
-    """Create a new database.
-    
-    Args:
-        name: Name for the new database (without .db extension)
-        
-    Returns:
-        Success message with DB path
-    """
-    db_path = get_db_path(name)
-    
-    if os.path.exists(db_path):
-        return {"message": "Database already exists", "name": name, "path": db_path}
-    
-    init_db(db_path)
-    # Initialize the DB instance
-    _db_cache[name] = MemoryDB(db_path=db_path)
-    
-    return {"message": "Database created", "name": name, "path": db_path}
+def get_db() -> MemoryDB:
+    """Get or create the single database instance."""
+    global _db_instance
+    if _db_instance is None:
+        db_path = get_db_path()
+        init_db(db_path)
+        _db_instance = MemoryDB(db_path=db_path)
+    return _db_instance
 
 
-@app.get("/db/list")
-async def list_databases() -> dict:
-    """List all existing databases."""
-    db_files = [f[:-3] for f in os.listdir(DB_DIR) if f.endswith(".db")]
-    return {"databases": db_files}
-
-
-@app.get("/db/exists/{name}")
-async def check_database_exists(name: str) -> dict:
-    """Check if a database exists."""
-    db_path = get_db_path(name)
-    return {"exists": os.path.exists(db_path), "name": name}
+@app.get("/db/info")
+async def get_db_info() -> dict:
+    """Get current database info."""
+    db_path = get_db_path()
+    return {"db_name": DEFAULT_DB, "db_path": db_path, "exists": os.path.exists(db_path)}
 
 
 class ExecuteSQLRequest(BaseModel):
@@ -160,7 +122,7 @@ class ExecuteSQLRequest(BaseModel):
 
 
 @app.post("/db/execute")
-async def execute_sql(request: ExecuteSQLRequest, db_name: str = Query("default", description="Database name")) -> dict:
+async def execute_sql(request: ExecuteSQLRequest) -> dict:
     """Execute raw SQL against the database.
     
     WARNING: This is a powerful and potentially dangerous operation.
@@ -168,17 +130,13 @@ async def execute_sql(request: ExecuteSQLRequest, db_name: str = Query("default"
     
     Args:
         request: SQL statement and optional parameters
-        db_name: Database name (query param)
         
     Returns:
         Query results or row count
     """
     import sqlite3
     
-    db_path = get_db_path(db_name)
-    
-    if not os.path.exists(db_path):
-        raise HTTPException(status_code=404, detail=f"Database {db_name} not found")
+    db_path = get_db_path()
     
     try:
         with sqlite3.connect(db_path) as conn:
@@ -206,16 +164,16 @@ async def execute_sql(request: ExecuteSQLRequest, db_name: str = Query("default"
 
 
 @app.post("/memories")
-async def add_memory(request: AddMemoryRequest, db: MemoryDB = Depends(get_db)) -> dict:
+async def add_memory(request: AddMemoryRequest) -> dict:
     """Add a new memory with optional keywords and properties.
     
     Args:
         request: Memory content, optional keywords, properties, and created_at timestamp
-        db: Database name (query param)
         
     Returns:
         The ID of the created memory
     """
+    db = get_db()
     memory_id = db.add_memory(
         content=request.content,
         keywords=request.keywords,
@@ -253,7 +211,6 @@ async def add_context(
     request: AddContextRequest,
     max_tokens: int | None = Query(None, description="Max tokens before summarization"),
     min_cluster_size: int | None = Query(None, description="Min messages before summarization"),
-    db: MemoryDB = Depends(get_db)
 ) -> dict:
     """Add a context message and auto-summarize if needed.
     
@@ -266,11 +223,11 @@ async def add_context(
         request: Context content and role
         max_tokens: Override max tokens before summarization (default 32000)
         min_cluster_size: Override min messages before summarization (default 3)
-        db: Database name (query param)
         
     Returns:
         Memory ID, role, token count, and summarization status
     """
+    db = get_db()
     ctx = Context(db, max_tokens=max_tokens or 32000, min_cluster_size=min_cluster_size or 3)
     result = ctx.add(request.role, request.content, request.created_at, request.session)
     
@@ -282,7 +239,6 @@ async def get_context(
     limit: int = Query(100, description="Max messages to return"),
     max_tokens: int | None = Query(None, description="Max tokens threshold (for get)"),
     session: str | None = Query(None, description="Session ID to filter context"),
-    db: MemoryDB = Depends(get_db)
 ) -> dict:
     """Get context for LLM: summary first, then unsummarized turns.
     
@@ -290,11 +246,11 @@ async def get_context(
         limit: Maximum number of unsummarized turns to return
         max_tokens: Override max tokens (optional, for metadata)
         session: Session ID to filter context (optional)
-        db: Database name (query param)
         
     Returns:
         List of context messages (summary + unsummarized)
     """
+    db = get_db()
     ctx = Context(db)
     context = ctx.get(limit=limit, session=session)
     
@@ -311,7 +267,6 @@ async def cluster_context(
     max_gap: int | None = Query(None, description="Max seconds between messages (auto-calculated from level if None)"),
     level: int = Query(1, description="Summary level (1 = summary, 2 = summary of summaries)"),
     session: str | None = Query(None, description="Session ID to cluster (optional)"),
-    db: MemoryDB = Depends(get_db)
 ) -> dict:
     """Force temporal clustering to reduce context to target token count.
     
@@ -329,12 +284,13 @@ async def cluster_context(
         Iterations, memories summarized, final token count
     """
     from context import Context
+    db = get_db()
     ctx = Context(db)
     return ctx.force_cluster(target_tokens, min_live_tokens, max_gap, level, session)
 
 
 @app.post("/memories/summary")
-async def add_summary(request: AddSummaryRequest, db: MemoryDB = Depends(get_db)) -> dict:
+async def add_summary(request: AddSummaryRequest) -> dict:
     """Add a summary memory and link it to target memories.
     
     The created_at timestamp is required and should be set by the agent
@@ -342,11 +298,11 @@ async def add_summary(request: AddSummaryRequest, db: MemoryDB = Depends(get_db)
     
     Args:
         request: Summary content, keywords, properties, created_at, target_ids, link_type
-        db: Database name (query param)
         
     Returns:
         The ID of the created summary memory
     """
+    db = get_db()
     
     # Add the summary memory
     summary_id = db.add_memory(
@@ -368,16 +324,16 @@ async def add_summary(request: AddSummaryRequest, db: MemoryDB = Depends(get_db)
 
 
 @app.post("/memories/link")
-async def add_link(request: AddLinkRequest, db: MemoryDB = Depends(get_db)) -> dict:
+async def add_link(request: AddLinkRequest) -> dict:
     """Add a link between two memories.
     
     Args:
         request: source_id, target_id, link_type
-        db: Database name (query param)
         
     Returns:
         Success message with link details
     """
+    db = get_db()
     
     db.add_link(
         source_id=request.source_id,
@@ -394,16 +350,16 @@ async def add_link(request: AddLinkRequest, db: MemoryDB = Depends(get_db)) -> d
 
 
 @app.post("/memories/search")
-async def search_memories(request: SearchRequest, db: MemoryDB = Depends(get_db)) -> dict:
+async def search_memories(request: SearchRequest) -> dict:
     """Search memories using the query DSL.
     
     Args:
         request: Query string and limit
-        db: Database name (query param)
         
     Returns:
         List of matching memories
     """
+    db = get_db()
     
     results = db.search(request.query, limit=request.limit)
     
@@ -411,17 +367,17 @@ async def search_memories(request: SearchRequest, db: MemoryDB = Depends(get_db)
 
 
 @app.get("/memories")
-async def list_memories(limit: int = 50, offset: int = 0, db: MemoryDB = Depends(get_db)) -> dict:
+async def list_memories(limit: int = 50, offset: int = 0) -> dict:
     """List all memories with pagination.
     
     Args:
         limit: Maximum number of memories to return
         offset: Number of memories to skip
-        db: Database name (query param)
         
     Returns:
         List of memories
     """
+    db = get_db()
     
     results = db.search("", limit=limit + offset)
     return {
@@ -433,16 +389,16 @@ async def list_memories(limit: int = 50, offset: int = 0, db: MemoryDB = Depends
 
 
 @app.get("/memories/{memory_id}")
-async def get_memory(memory_id: int, db: MemoryDB = Depends(get_db)) -> dict:
+async def get_memory(memory_id: int) -> dict:
     """Get a memory by ID.
     
     Args:
         memory_id: The ID of the memory
-        db: Database name (query param)
         
     Returns:
         The memory data
     """
+    db = get_db()
     
     memory = db.get_memory(memory_id)
     if not memory:
@@ -452,16 +408,16 @@ async def get_memory(memory_id: int, db: MemoryDB = Depends(get_db)) -> dict:
 
 
 @app.delete("/memories/{memory_id}")
-async def delete_memory(memory_id: int, db: MemoryDB = Depends(get_db)) -> dict:
+async def delete_memory(memory_id: int) -> dict:
     """Delete a memory by ID.
     
     Args:
         memory_id: The ID of the memory to delete
-        db: Database name (query param)
         
     Returns:
         Success message
     """
+    db = get_db()
     
     deleted = db.delete_memory(memory_id)
     if not deleted:
@@ -477,17 +433,17 @@ class UpdateMemoryRequest(BaseModel):
 
 
 @app.put("/memories/{memory_id}")
-async def update_memory(memory_id: int, request: UpdateMemoryRequest, db: MemoryDB = Depends(get_db)) -> dict:
+async def update_memory(memory_id: int, request: UpdateMemoryRequest) -> dict:
     """Update a memory's properties and/or keywords.
     
     Args:
         memory_id: The ID of the memory to update
         request: Update request with properties and/or keywords
-        db: Database name (query param)
         
     Returns:
         Updated memory data
     """
+    db = get_db()
     
     updated = db.update_memory(memory_id, request.properties, request.keywords)
     if not updated:
@@ -497,16 +453,16 @@ async def update_memory(memory_id: int, request: UpdateMemoryRequest, db: Memory
 
 
 @app.post("/embed")
-async def get_embedding(request: EmbedRequest, db: MemoryDB = Depends(get_db)) -> dict:
+async def get_embedding(request: EmbedRequest) -> dict:
     """Get embedding vector for text.
     
     Args:
         request: Text to embed
-        db: Database name (query param)
         
     Returns:
         Embedding vector as list of floats
     """
+    db = get_db()
     
     embedding = db.embedding.get(request.text)
     
@@ -518,15 +474,13 @@ async def get_embedding(request: EmbedRequest, db: MemoryDB = Depends(get_db)) -
 
 
 @app.get("/stats")
-async def get_stats(db: MemoryDB = Depends(get_db)) -> dict:
+async def get_stats() -> dict:
     """Get memory statistics.
     
-    Args:
-        db: Database name (query param)
-        
     Returns:
         Count of memories
     """
+    db = get_db()
     
     results = db.search("", limit=10000)
     
