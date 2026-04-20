@@ -158,7 +158,7 @@ class Context:
             Dict with id, role, token_count, created_at, and summarization result
         """
         if role not in self.VALID_ROLES:
-            raise ValueError(f"Invalid role. Must be one of: {self.VALID_ROLES}")
+            raise ValueError(f"Invalid role. Must be one of: {{{', '.join(self.VALID_ROLES)}}}]")
         
         if not created_at:
             created_at = datetime.now(timezone.utc).isoformat()
