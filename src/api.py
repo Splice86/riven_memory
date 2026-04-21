@@ -250,13 +250,24 @@ async def get_context(
         session: Session ID to filter context (optional)
         
     Returns:
-        List of context messages (summary + unsummarized)
+        List of context messages (summary + unsummarized) with timestamps
     """
     db = get_db()
     ctx = Context(db)
     context = ctx.get(limit=limit, session=session)
     
-    return {"context": context, "count": len(context)}
+    # Get timestamps for the context metadata
+    now = datetime.now(timezone.utc)
+    earliest = min((item["created_at"] for item in context), default=None)
+    latest = max((item["created_at"] for item in context), default=None)
+    
+    return {
+        "context": context,
+        "count": len(context),
+        "retrieved_at": now.isoformat(),
+        "earliest_created_at": earliest,
+        "latest_created_at": latest,
+    }
 
 
 

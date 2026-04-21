@@ -240,11 +240,7 @@ class Context:
                 ctx_item["function"] = mem["properties"]["function"]
             context.append(ctx_item)
         
-        return {
-            **context,
-            "added_at": result["added_at"].isoformat() if result.get("added_at") else None,
-            "updated_at": result["updated_at"].isoformat() if result.get("updated_at") else None,
-        }
+        return context
     
     def get_token_count(self, session: str = None) -> int:
         """Get total tokens in unsummarized context."""
