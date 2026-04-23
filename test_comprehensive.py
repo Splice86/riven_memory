@@ -156,6 +156,28 @@ def add_test_data(use_vector=False):
         created_at=(now - timedelta(days=5)).isoformat()
     )
     
+    # ===== GROUP 6: Multi-value property strings for wildcard testing =====
+    mem13 = db.add_memory(
+        "Frontend React component with TypeScript",
+        keywords=["frontend", "react", "typescript"],
+        properties={"category": "frontend_development", "env": "production"},
+        created_at=(now - timedelta(days=1)).isoformat()
+    )
+    
+    mem14 = db.add_memory(
+        "Backend API with FastAPI",
+        keywords=["backend", "fastapi", "api"],
+        properties={"category": "backend_api", "env": "staging"},
+        created_at=(now - timedelta(days=2)).isoformat()
+    )
+    
+    mem15 = db.add_memory(
+        "Fullstack Next.js application",
+        keywords=["fullstack", "nextjs", "javascript"],
+        properties={"category": "fullstack_app", "env": "production"},
+        created_at=(now - timedelta(days=3)).isoformat()
+    )
+    
     # ===== LINKS =====
     # Summary -> original
     db.add_link(summary1, mem5, "summary_of")
@@ -224,6 +246,27 @@ def test_keywords(db):
         passed += 1
     else:
         print(f"  ✗ NOT k:python -> {len(results)} (expected >=4)")
+        failed += 1
+    
+    # ===== KEYWORD WILDCARD TESTS =====
+    
+    # Test 5: Keyword prefix wildcard - k:python* should match python, python3, etc.
+    # (but keywords are stored as exact words, so only exact "python" matches)
+    results = db.search("k:python*")
+    if len(results) >= 3:  # mem1, mem3, mem5, summary1
+        print(f"  ✓ k:python* -> {len(results)} results")
+        passed += 1
+    else:
+        print(f"  ✗ k:python* -> {len(results)} (expected >=3)")
+        failed += 1
+    
+    # Test 6: Keyword contains wildcard - k:*machine* should match machine-learning
+    results = db.search("k:*machine*")
+    if len(results) >= 2:  # mem6, summary2 (machine-learning keyword)
+        print(f"  ✓ k:*machine* -> {len(results)} results")
+        passed += 1
+    else:
+        print(f"  ✗ k:*machine* -> {len(results)} (expected >=2)")
         failed += 1
     
     return passed, failed
@@ -347,6 +390,80 @@ def test_properties(db):
         passed += 1
     else:
         print(f"  ✗ p:rating>=4 -> {len(results)} (expected >=1)")
+        failed += 1
+    
+    # ===== PROPERTY VALUE WILDCARD TESTS =====
+    
+    # Test 13: Property prefix wildcard - p:category=frontend* matches frontend_development
+    results = db.search("p:category=frontend*")
+    if len(results) >= 1:  # mem13 (category=frontend_development)
+        print(f"  ✓ p:category=frontend* -> {len(results)} results")
+        passed += 1
+    else:
+        print(f"  ✗ p:category=frontend* -> {len(results)} (expected >=1)")
+        failed += 1
+    
+    # Test 14: Property contains wildcard - p:category=*api* matches backend_api
+    results = db.search("p:category=*api*")
+    if len(results) >= 1:  # mem14 (category=backend_api)
+        print(f"  ✓ p:category=*api* -> {len(results)} results")
+        passed += 1
+    else:
+        print(f"  ✗ p:category=*api* -> {len(results)} (expected >=1)")
+        failed += 1
+    
+    # Test 15: Property wildcard matching multiple - p:category=*end* matches frontend_development, backend_api, fullstack_app
+    results = db.search("p:category=*end*")
+    if len(results) >= 3:  # mem13, mem14, mem15 all contain "end" in their category
+        print(f"  ✓ p:category=*end* -> {len(results)} results")
+        passed += 1
+    else:
+        print(f"  ✗ p:category=*end* -> {len(results)} (expected >=3)")
+        failed += 1
+    
+    # Test 16: Property suffix wildcard - p:category=*app matches fullstack_app
+    results = db.search("p:category=*app")
+    if len(results) >= 1:  # mem15 (category=fullstack_app)
+        print(f"  ✓ p:category=*app -> {len(results)} results")
+        passed += 1
+    else:
+        print(f"  ✗ p:category=*app -> {len(results)} (expected >=1)")
+        failed += 1
+    
+    # Test 17: Single-char wildcard - p:category=?ackend* matches backend_api
+    results = db.search("p:category=?ackend*")
+    if len(results) >= 1:  # mem14 (category=backend_api)
+        print(f"  ✓ p:category=?ackend* -> {len(results)} results")
+        passed += 1
+    else:
+        print(f"  ✗ p:category=?ackend* -> {len(results)} (expected >=1)")
+        failed += 1
+    
+    # Test 18: Wildcard on status - p:status=act* matches active
+    results = db.search("p:status=act*")
+    if len(results) >= 2:  # mem5 (active), summary1 (active)
+        print(f"  ✓ p:status=act* -> {len(results)} results")
+        passed += 1
+    else:
+        print(f"  ✗ p:status=act* -> {len(results)} (expected >=2)")
+        failed += 1
+    
+    # Test 19: Wildcard that matches nothing returns empty
+    results = db.search("p:category=nonexistent*")
+    if len(results) == 0:
+        print(f"  ✓ p:category=nonexistent* -> {len(results)} results (correctly empty)")
+        passed += 1
+    else:
+        print(f"  ✗ p:category=nonexistent* -> {len(results)} (expected 0)")
+        failed += 1
+    
+    # Test 20: Wildcard combined with keyword filter
+    results = db.search("p:category=*end* AND k:react")
+    if len(results) >= 1:  # mem13 (category=frontend_development, keyword=react)
+        print(f"  ✓ p:category=*end* AND k:react -> {len(results)} results")
+        passed += 1
+    else:
+        print(f"  ✗ p:category=*end* AND k:react -> {len(results)} (expected >=1)")
         failed += 1
     
     return passed, failed

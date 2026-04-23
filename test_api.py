@@ -344,6 +344,26 @@ def test_search_property_numeric(url: str, db: str) -> bool:
     return True
 
 
+def test_search_property_wildcard(url: str, db: str) -> bool:
+    """Test property value wildcard search."""
+    print("\n[TEST] Search by property wildcard (p:category=*end*)...")
+    resp = requests.post(f"{url}/memories/search?db_name={db}", json={
+        "query": "p:category=*end*"
+    })
+    if resp.status_code != 200:
+        print(f"  FAIL: Status {resp.status_code}")
+        return False
+    data = resp.json()
+    count = data.get('count', 0)
+    print(f"  Found {count} memories with category containing 'end'")
+    if count >= 1:
+        print("  PASS")
+        return True
+    else:
+        print(f"  FAIL: expected >=1 results, got {count}")
+        return False
+
+
 # ============================================================================
 # DATE FILTER TESTS
 # ============================================================================
@@ -745,6 +765,7 @@ def run_tests(url: str, db: str) -> None:
     # --- Property Filters ---
     results.append(("Property equals", test_search_property_equals(url, db)))
     results.append(("Property numeric", test_search_property_numeric(url, db)))
+    results.append(("Property wildcard", test_search_property_wildcard(url, db)))
     
     # --- Date Filters ---
     results.append(("Date range", test_search_date_range(url, db)))

@@ -66,8 +66,11 @@ from enum import Enum
 #   "s:python@0.8"                     - similar to python with 0.8 threshold
 #   "q:machine learning"             - semantic text search (threshold 0.5)
 #   "q:machine learning@0.3"           - semantic text with looser threshold
-#   "p:role=user"                      - property = user
-#   "p:role=user AND importance=high" - multiple properties
+#   p:role=user                      - property = user
+#   p:role=user AND importance=high" - multiple properties
+#   p:status=active*                  - property wildcard (prefix match)
+#   p:name=*test*                     - property wildcard (contains match)
+#   p:type=?ing                       - property wildcard (? = single char)
 #   "d:last 30 days"                  - last 30 days
 #   "d:2025-01-01 to 2025-01-31"      - date range
 #   "(k:python OR s:javascript) AND NOT k:deprecated"
@@ -698,8 +701,15 @@ class SearchParser:
         
         if search_type == SearchType.KEYWORD:
             # Keyword exact match - search via memory_keywords junction table
-            sql = " EXISTS (SELECT 1 FROM memory_keywords mk JOIN keywords k ON mk.keyword_id = k.id WHERE mk.memory_id = m.id AND k.name = ?)"
-            params = [value.lower()]
+            # Support wildcards: * matches any characters, ? matches single char
+            if '*' in value or '?' in value:
+                # Convert * to % and ? to _ for SQL LIKE
+                like_pattern = value.lower().replace('*', '%').replace('?', '_')
+                sql = " EXISTS (SELECT 1 FROM memory_keywords mk JOIN keywords k ON mk.keyword_id = k.id WHERE mk.memory_id = m.id AND k.name LIKE ?)"
+                params = [like_pattern]
+            else:
+                sql = " EXISTS (SELECT 1 FROM memory_keywords mk JOIN keywords k ON mk.keyword_id = k.id WHERE mk.memory_id = m.id AND k.name = ?)"
+                params = [value.lower()]
         
         elif search_type == SearchType.KEYWORD_SIM:
             # Keyword similarity - use embedding vectors
@@ -772,6 +782,7 @@ class SearchParser:
                 prop_key, operator, prop_val = match.groups()
                 prop_key = prop_key.lower()
                 
+                # Wildcards in numeric comparisons don't make sense — treat as literal
                 # Try to convert prop_val to number for numeric comparison
                 try:
                     num_val = float(prop_val)
@@ -793,8 +804,16 @@ class SearchParser:
             elif '=' in value:
                 # Simple key=value format
                 prop_key, prop_val = value.split('=', 1)
-                sql = " EXISTS (SELECT 1 FROM properties mp WHERE mp.memory_id = m.id AND mp.key = ? AND mp.value = ?)"
-                params = [prop_key.lower(), prop_val]
+                prop_key = prop_key.lower()
+                
+                # Support wildcards in property values: * matches any chars, ? matches single char
+                if '*' in prop_val or '?' in prop_val:
+                    like_pattern = prop_val.replace('*', '%').replace('?', '_')
+                    sql = " EXISTS (SELECT 1 FROM properties mp WHERE mp.memory_id = m.id AND mp.key = ? AND mp.value LIKE ?)"
+                    params = [prop_key, like_pattern]
+                else:
+                    sql = " EXISTS (SELECT 1 FROM properties mp WHERE mp.memory_id = m.id AND mp.key = ? AND mp.value = ?)"
+                    params = [prop_key, prop_val]
             else:
                 sql = " 1=1"
                 params = []

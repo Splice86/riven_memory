@@ -586,8 +586,8 @@ async def get_search_syntax() -> dict:
             },
             "property": {
                 "syntax": "p:<key>=<value> or p:<key><op><value>",
-                "example": "p:status=active, p:rating>=4, p:opinion<0",
-                "description": "Filter by property. Supports string equality and numeric comparisons: <, >, <=, >=, !="
+                "example": "p:status=active, p:rating>=4, p:opinion<0, p:status=active*, p:name=*test*",
+                "description": "Filter by property. Supports string equality (with wildcards: * = any chars, ? = single char), and numeric comparisons: <, >, <=, >=, !="
             },
             "date": {
                 "syntax": "d:last <n> days or d:<date>",
