@@ -87,12 +87,13 @@ class AddContextRequest(BaseModel):
     session: str | None = None  # Optional session ID (stored as property)
     tool_call_id: str | None = None  # Optional tool call ID for tracing
     function: str | None = None  # Optional function name for tool results
-
+    max_live_messages: int | None = None  # Hard cap on unsummarized messages (force summary if exceeded)
 
 
 class GetContextRequest(BaseModel):
     """Request to get context."""
     limit: int = 100
+    max_summaries: int = 3  # How many top-level summaries to include
     session: str | None = None  # Optional session ID to filter by
 
 
@@ -211,7 +212,6 @@ def _count_message_tokens(role: str, content: str) -> int:
 @app.post("/context")
 async def add_context(
     request: AddContextRequest,
-    max_tokens: int | None = Query(None, description="Max tokens before summarization"),
     min_cluster_size: int | None = Query(None, description="Min messages before summarization"),
 ) -> dict:
     """Add a context message and auto-summarize if needed.
@@ -220,50 +220,67 @@ async def add_context(
     - Adding the message with context keyword and role
     - Token counting
     - Auto-summarization when threshold is exceeded
+    - Force summarization when max_live_messages is exceeded
     
     Args:
         request: Context content and role
-        max_tokens: Override max tokens before summarization (default 32000)
         min_cluster_size: Override min messages before summarization (default 3)
         
     Returns:
         Memory ID, role, token count, and summarization status
     """
     db = get_db()
-    ctx = Context(db, max_tokens=max_tokens or 32000, min_cluster_size=min_cluster_size or 3)
-    result = ctx.add(request.role, request.content, request.created_at, request.session, request.tool_call_id, request.function)
+    ctx = Context(db, min_cluster_size=min_cluster_size or 3)
+    result = ctx.add(
+        request.role, 
+        request.content, 
+        request.created_at, 
+        request.session, 
+        request.tool_call_id, 
+        request.function,
+        max_live_messages=request.max_live_messages
+    )
     
     return result
 
 
 @app.get("/context")
 async def get_context(
-    limit: int = Query(100, description="Max messages to return"),
-    max_tokens: int | None = Query(None, description="Max tokens threshold (for get)"),
+    limit: int = Query(100, description="Max unsummarized messages to return"),
+    max_summaries: int = Query(3, description="Max top-level summaries to include"),
     session: str | None = Query(None, description="Session ID to filter context"),
 ) -> dict:
-    """Get context for LLM: summary first, then unsummarized turns.
+    """Get context for LLM: top summaries first, then unsummarized turns.
+    
+    Summaries are fetched as the "top level" of the summary tree - summaries
+    that have no parent summary pointing to them. Only the most recent
+    max_summaries are included, oldest first.
     
     Args:
-        limit: Maximum number of unsummarized turns to return
-        max_tokens: Override max tokens (optional, for metadata)
+        limit: Maximum number of unsummarized messages to return
+        max_summaries: Maximum number of top-level summaries to include
         session: Session ID to filter context (optional)
         
     Returns:
-        List of context messages (summary + unsummarized) with timestamps
+        List of context messages (summaries + unsummarized) with timestamps
     """
     db = get_db()
     ctx = Context(db)
-    context = ctx.get(limit=limit, session=session)
+    context = ctx.get(limit=limit, max_summaries=max_summaries, session=session)
     
     # Get timestamps for the context metadata
     now = datetime.now(timezone.utc)
     earliest = min((item["created_at"] for item in context), default=None)
     latest = max((item["created_at"] for item in context), default=None)
     
+    # Count summaries vs messages for metadata
+    summary_count = sum(1 for item in context if item.get("role") == "summary")
+    
     return {
         "context": context,
         "count": len(context),
+        "summary_count": summary_count,
+        "message_count": len(context) - summary_count,
         "retrieved_at": now.isoformat(),
         "earliest_created_at": earliest,
         "latest_created_at": latest,

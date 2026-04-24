@@ -35,7 +35,6 @@ except ImportError:
 LLM_URL = cfg.get('llm.url', 'http://127.0.0.1:8000/v1/')
 LLM_API_KEY = cfg.get('llm.api_key', 'sk-dummy')
 LLM_MODEL = cfg.get('llm.model', 'nvidia/MiniMax-M2.5-NVFP4')
-MAX_TOKENS_DEFAULT = cfg.get('context.max_tokens', 32000)
 MIN_CLUSTER_SIZE = cfg.get('context.min_cluster_size', 3)
 
 
@@ -81,7 +80,8 @@ class SummarizerLLM:
         self.model = model
         
         if openai_available:
-            self.client = OpenAI(base_url=f"{self.llm_url}/v1", api_key=self.llm_api_key)
+            # URL should already include /v1 (matches riven_core secrets.yaml format)
+            self.client = OpenAI(base_url=self.llm_url, api_key=self.llm_api_key)
         else:
             self.client = None
     
@@ -134,17 +134,17 @@ class Context:
     
     VALID_ROLES = {"user", "assistant", "system", "tool"}
     
-    def __init__(self, db, max_tokens: int = MAX_TOKENS_DEFAULT, min_cluster_size: int = MIN_CLUSTER_SIZE):
+    def __init__(self, db, min_cluster_size: int = MIN_CLUSTER_SIZE):
         self.db = db
-        self.max_tokens = max_tokens
         self.min_cluster_size = min_cluster_size
     
     def add(self, role: str, text: str, created_at: str = None, session: str = None, 
-            tool_call_id: str = None, function: str = None) -> dict:
+            tool_call_id: str = None, function: str = None, max_live_messages: int = None) -> dict:
         """
         Add a context message.
         
         Automatically checks and runs summarization if needed.
+        If max_live_messages is set, forces summarization when count exceeds it.
         
         Args:
             role: Message role (user, assistant, system, tool)
@@ -153,6 +153,7 @@ class Context:
             session: Optional session ID to group memories (stored as property)
             tool_call_id: Optional tool call ID for tracing tool responses to their requests
             function: Optional function name for tool results
+            max_live_messages: Hard cap on unsummarized messages (forces summary if exceeded)
             
         Returns:
             Dict with id, role, token_count, created_at, and summarization result
@@ -184,8 +185,14 @@ class Context:
             session=session
         )
         
-        # Check if summarization is needed
+        # Check if summarization is needed (token-based)
         summary_result = self._maybe_summarize(session)
+        
+        # Force summarization if max_live_messages is exceeded
+        if max_live_messages is not None:
+            force_result = self._force_summary_by_count(session, max_live_messages)
+            if force_result.get("summarized"):
+                summary_result = force_result
         
         return {
             "id": memory_id,
@@ -197,32 +204,37 @@ class Context:
             "memories_summarized": summary_result.get("memories_summarized", 0)
         }
     
-    def get(self, limit: int = 100, session: str = None) -> list[dict]:
+    def get(self, limit: int = 100, max_summaries: int = 3, session: str = None) -> list[dict]:
         """
-        Get context for LLM: summary first, then unsummarized turns.
+        Get context for LLM: top summaries first, then unsummarized turns.
+        
+        Summaries are fetched as the "top level" of the summary tree - summaries
+        that have no parent summary pointing to them.
         
         Args:
-            limit: Maximum number of unsummarized turns to return
+            limit: Maximum number of unsummarized messages to return
+            max_summaries: Maximum number of top-level summaries to include
             session: Optional session ID to filter by
             
         Returns:
             List of memory dicts with id, role, content, created_at
         """
-        # Get last summary (filtered by session if provided)
-        summary = self._get_last_summary(session)
+        # Get top-level summaries (roots of the summary tree)
+        summaries = self._get_top_summaries(session, max_summaries)
         
-        # Get unsummarized (filtered by session if provided)
+        # Get unsummarized messages (filtered by session if provided)
         unsummarized = self._get_unsummarized(limit, session)
         
-        # Build context: summary first, then unsummarized
+        # Build context: summaries first (oldest first), then unsummarized (most recent)
         context = []
         
-        if summary:
+        for summary in summaries:
             context.append({
                 "id": summary["id"],
                 "role": "summary",
                 "content": summary["content"],
-                "created_at": summary["created_at"]
+                "created_at": summary["created_at"],
+                "summary_level": summary.get("properties", {}).get("summary_level", "1")
             })
         
         for mem in unsummarized:
@@ -297,11 +309,6 @@ class Context:
             })
         
         if len(unsummarized) < self.min_cluster_size:
-            return {"summarized": False}
-        
-        total_tokens = sum(m["token_count"] for m in unsummarized)
-        
-        if total_tokens <= self.max_tokens:
             return {"summarized": False}
         
         return self._summarize(unsummarized, session)
@@ -381,6 +388,128 @@ class Context:
         # Sort by created_at desc to get most recent
         results.sort(key=lambda m: m.get("created_at", ""), reverse=True)
         return results[0]
+    
+    def _get_top_summaries(self, session: str = None, max_summaries: int = 3) -> list[dict]:
+        """
+        Get top-level summaries (roots of the summary tree).
+        
+        A "top" summary is one that has no parent summary pointing to it.
+        These are the oldest/highest-level summaries that should be included
+        in context.
+        
+        Args:
+            session: Optional session filter
+            max_summaries: Maximum number of top summaries to return
+            
+        Returns:
+            List of top-level summary memories, oldest first
+        """
+        # Get all summaries
+        query_parts = ["k:summary"]
+        if session:
+            query_parts.append(f"p:session={session}")
+        query = " AND ".join(query_parts)
+        all_summaries = self.db.search(query, limit=10000)
+        
+        # Filter out already-summarized summaries
+        summaries = [
+            m for m in all_summaries 
+            if m.get("properties", {}).get("was_summarized") != "true"
+        ]
+        
+        # For each summary, check if any OTHER summary links TO it
+        # (i.e., is it a parent of another summary?)
+        top_summaries = []
+        for s in summaries:
+            # Search for links where this summary is the target (child)
+            # Links are stored as: link_type:source_id:target_id
+            # We search for summaries that have this summary as their source
+            child_links = self.db.search(
+                f"l:summary_of", 
+                limit=1000
+            )
+            # Check if any link points TO this summary
+            has_child = False
+            for link in child_links:
+                link_props = link.get("properties", {})
+                target_id = link_props.get(f"target_id")
+                if target_id and int(target_id) == s["id"]:
+                    has_child = True
+                    break
+            
+            # If no links point TO this summary, it's a "top" summary
+            if not has_child:
+                top_summaries.append(s)
+        
+        # Sort newest first, take max, then reverse (return oldest first)
+        top_summaries.sort(key=lambda m: m.get("created_at", ""), reverse=True)
+        top_summaries = top_summaries[:max_summaries]
+        top_summaries.reverse()  # Oldest first
+        
+        return top_summaries
+    
+    def _force_summary_by_count(self, session: str = None, max_live_messages: int = 50) -> dict:
+        """
+        Force summarization if unsummarized message count exceeds max_live_messages.
+        
+        Groups oldest messages and summarizes them until count is within limit.
+        
+        Args:
+            session: Optional session filter
+            max_live_messages: Hard cap on unsummarized messages
+            
+        Returns:
+            Dict with summarization result
+        """
+        # Get all unsummarized messages (ignore limit, we need full count)
+        query_parts = ["k:context"]
+        if session:
+            query_parts.append(f"p:session={session}")
+        query = " AND ".join(query_parts)
+        results = self.db.search(query, limit=10000)
+        
+        unsummarized = []
+        for mem in results:
+            props = mem.get("properties", {})
+            if props.get("was_summarized") == "true":
+                continue
+            if props.get("role") == "summary":
+                continue
+            
+            token_count = props.get("token_count", "0")
+            try:
+                token_count = int(token_count)
+            except ValueError:
+                token_count = count_tokens(mem.get("content", ""))
+            
+            unsummarized.append({
+                "id": mem["id"],
+                "content": mem["content"],
+                "created_at": mem["created_at"],
+                "token_count": token_count,
+                "properties": props
+            })
+        
+        # Check if we're over the limit
+        if len(unsummarized) <= max_live_messages:
+            return {"summarized": False}
+        
+        # Sort oldest first
+        unsummarized.sort(key=lambda m: m["created_at"])
+        
+        # Calculate how many we need to summarize
+        # Leave max_live_messages in unsummarized, summarize the rest
+        excess = len(unsummarized) - max_live_messages
+        
+        if excess < self.min_cluster_size:
+            # Not enough to trigger summary, wait for more
+            return {"summarized": False}
+        
+        # Summarize oldest messages (the ones that will be summarized away)
+        # Always leave at least min_cluster_size in the oldest group
+        to_summarize = unsummarized[:max(self.min_cluster_size, excess)]
+        
+        return self._summarize(to_summarize, session)
     
     def _get_unsummarized(self, limit: int, session: str = None) -> list[dict]:
         """Get unsummarized context memories."""

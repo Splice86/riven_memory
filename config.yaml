@@ -20,21 +20,16 @@ api:
   host: "0.0.0.0"
   port: 8030
 
-# LLM settings for summarization (override in secrets_template.yaml)
-llm:
-  url: "http://127.0.0.1:8010"
-  model: "nvidia/MiniMax-M2.5-NVFP4"
-  context_window: 128000
+# LLM settings for summarization - see secrets_template.yaml for defaults
+# DO NOT set url/model here - those come from secrets (secrets.yaml > secrets_template.yaml)
 
 # Context / Summarization settings
 context:
-  # Max tokens in active context before triggering summarization
-  max_tokens: 100000
   # Temporal clustering: new cluster if gap > this many minutes
   cluster_gap_minutes: 2
   # Don't summarize messages from the last N minutes (active session)
   cluster_exclude_minutes: 3
-  # Minimum cluster size to consider for summarization
+  # Minimum cluster size before triggering summarization
   min_cluster_size: 3
 
 # Embedding settings

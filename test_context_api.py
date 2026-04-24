@@ -240,7 +240,7 @@ def test_summarization_auto_trigger(url: str, db: str) -> bool:
     
     old_time = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
     
-    # Add 5 messages with LOW thresholds (min_cluster_size=3, max_tokens=80)
+    # Add 5 messages with min_cluster_size=3 to trigger summarization
     messages = [
         ("user", "This is the first old message for testing summarization."),
         ("assistant", "This is a response to the first old message."),
@@ -251,7 +251,7 @@ def test_summarization_auto_trigger(url: str, db: str) -> bool:
     
     for i, (role, content) in enumerate(messages):
         resp = requests.post(
-            f"{url}/context?db_name=test_summarize&max_tokens=80&min_cluster_size=3",
+            f"{url}/context?db_name=test_summarize&min_cluster_size=3",
             json={
                 "content": content,
                 "role": role,
