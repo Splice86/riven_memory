@@ -134,17 +134,19 @@ class Context:
     
     VALID_ROLES = {"user", "assistant", "system", "tool"}
     
-    def __init__(self, db, min_cluster_size: int = MIN_CLUSTER_SIZE):
+    def __init__(self, db, min_cluster_size: int = MIN_CLUSTER_SIZE, trigger_limit: int = 40, min_keep: int = 20):
         self.db = db
         self.min_cluster_size = min_cluster_size
+        self.trigger_limit = trigger_limit  # Summarize when unsummarized count >= this
+        self.min_keep = min_keep  # Minimum unsummarized to keep after summary
     
     def add(self, role: str, text: str, created_at: str = None, session: str = None, 
-            tool_call_id: str = None, function: str = None, max_live_messages: int = None) -> dict:
+            tool_call_id: str = None, function: str = None, trigger_limit: int = None) -> dict:
         """
         Add a context message.
         
-        Automatically checks and runs summarization if needed.
-        If max_live_messages is set, forces summarization when count exceeds it.
+        Automatically checks and runs summarization if unsummarized count >= trigger_limit.
+        Default trigger_limit is 40 (summarize when we hit 40, keeping at least 20).
         
         Args:
             role: Message role (user, assistant, system, tool)
@@ -153,7 +155,7 @@ class Context:
             session: Optional session ID to group memories (stored as property)
             tool_call_id: Optional tool call ID for tracing tool responses to their requests
             function: Optional function name for tool results
-            max_live_messages: Hard cap on unsummarized messages (forces summary if exceeded)
+            trigger_limit: Summarize when unsummarized count >= this (default: 40)
             
         Returns:
             Dict with id, role, token_count, created_at, and summarization result
@@ -185,14 +187,9 @@ class Context:
             session=session
         )
         
-        # Check if summarization is needed (token-based)
-        summary_result = self._maybe_summarize(session)
-        
-        # Force summarization if max_live_messages is exceeded
-        if max_live_messages is not None:
-            force_result = self._force_summary_by_count(session, max_live_messages)
-            if force_result.get("summarized"):
-                summary_result = force_result
+        # Check if summarization is needed (triggered when unsummarized >= trigger_limit)
+        effective_trigger = trigger_limit if trigger_limit is not None else self.trigger_limit
+        summary_result = self._maybe_summarize(session, effective_trigger)
         
         return {
             "id": memory_id,
@@ -280,8 +277,15 @@ class Context:
         
         return total
     
-    def _maybe_summarize(self, session: str = None) -> dict:
-        """Check token count and summarize if needed."""
+    def _maybe_summarize(self, session: str = None, trigger_limit: int = None) -> dict:
+        """Check unsummarized count and summarize if needed.
+        
+        Triggers when unsummarized count >= trigger_limit.
+        Keeps at least min_keep unsummarized (may be more due to temporal clustering).
+        """
+        if trigger_limit is None:
+            trigger_limit = self.trigger_limit
+        
         # Build query with session filter if provided (property filter)
         query_parts = ["k:context"]
         if session:
@@ -294,6 +298,8 @@ class Context:
             props = mem.get("properties", {})
             if props.get("was_summarized") == "true":
                 continue
+            if props.get("role") == "summary":
+                continue
             
             token_count = props.get("token_count", "0")
             try:
@@ -305,13 +311,37 @@ class Context:
                 "id": mem["id"],
                 "content": mem["content"],
                 "created_at": mem["created_at"],
-                "token_count": token_count
+                "token_count": token_count,
+                "properties": props
             })
         
-        if len(unsummarized) < self.min_cluster_size:
+        # Sort oldest first
+        unsummarized.sort(key=lambda m: m["created_at"])
+        
+        if len(unsummarized) < trigger_limit:
             return {"summarized": False}
         
-        return self._summarize(unsummarized, session)
+        # Need to summarize enough to get below trigger_limit but keep at least min_keep
+        # Due to temporal clustering, may end up with more than min_keep
+        excess = len(unsummarized) - self.min_keep
+        
+        if excess < self.min_cluster_size:
+            return {"summarized": False}
+        
+        # Use temporal clustering to determine group boundaries
+        groups = self._group_by_time(unsummarized, max_gap=30)
+        
+        # Find groups to summarize: oldest groups until we'd be below min_keep
+        to_summarize = []
+        for group in groups:
+            if len(unsummarized) - len(to_summarize) - len(group) < self.min_keep:
+                break
+            to_summarize.extend(group)
+        
+        if len(to_summarize) < self.min_cluster_size:
+            return {"summarized": False}
+        
+        return self._summarize(to_summarize, session)
     
     def _summarize(self, memories: list[dict], session: str = None, level: int = None) -> dict:
         """Summarize the given memories at the specified level."""
@@ -450,68 +480,7 @@ class Context:
         
         return top_summaries
     
-    def _force_summary_by_count(self, session: str = None, max_live_messages: int = 50) -> dict:
-        """
-        Force summarization if unsummarized message count exceeds max_live_messages.
-        
-        Groups oldest messages and summarizes them until count is within limit.
-        
-        Args:
-            session: Optional session filter
-            max_live_messages: Hard cap on unsummarized messages
-            
-        Returns:
-            Dict with summarization result
-        """
-        # Get all unsummarized messages (ignore limit, we need full count)
-        query_parts = ["k:context"]
-        if session:
-            query_parts.append(f"p:session={session}")
-        query = " AND ".join(query_parts)
-        results = self.db.search(query, limit=10000)
-        
-        unsummarized = []
-        for mem in results:
-            props = mem.get("properties", {})
-            if props.get("was_summarized") == "true":
-                continue
-            if props.get("role") == "summary":
-                continue
-            
-            token_count = props.get("token_count", "0")
-            try:
-                token_count = int(token_count)
-            except ValueError:
-                token_count = count_tokens(mem.get("content", ""))
-            
-            unsummarized.append({
-                "id": mem["id"],
-                "content": mem["content"],
-                "created_at": mem["created_at"],
-                "token_count": token_count,
-                "properties": props
-            })
-        
-        # Check if we're over the limit
-        if len(unsummarized) <= max_live_messages:
-            return {"summarized": False}
-        
-        # Sort oldest first
-        unsummarized.sort(key=lambda m: m["created_at"])
-        
-        # Calculate how many we need to summarize
-        # Leave max_live_messages in unsummarized, summarize the rest
-        excess = len(unsummarized) - max_live_messages
-        
-        if excess < self.min_cluster_size:
-            # Not enough to trigger summary, wait for more
-            return {"summarized": False}
-        
-        # Summarize oldest messages (the ones that will be summarized away)
-        # Always leave at least min_cluster_size in the oldest group
-        to_summarize = unsummarized[:max(self.min_cluster_size, excess)]
-        
-        return self._summarize(to_summarize, session)
+
     
     def _get_unsummarized(self, limit: int, session: str = None) -> list[dict]:
         """Get unsummarized context memories."""
