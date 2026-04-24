@@ -246,18 +246,18 @@ async def add_context(
 
 @app.get("/context")
 async def get_context(
-    limit: int = Query(100, description="Max unsummarized messages to return"),
     max_summaries: int = Query(3, description="Max top-level summaries to include"),
     session: str | None = Query(None, description="Session ID to filter context"),
 ) -> dict:
-    """Get context for LLM: top summaries first, then unsummarized turns.
+    """Get context for LLM: top summaries first, then all unsummarized turns.
     
     Summaries are fetched as the "top level" of the summary tree - summaries
     that have no parent summary pointing to them. Only the most recent
     max_summaries are included, oldest first.
     
+    All unsummarized messages are returned.
+    
     Args:
-        limit: Maximum number of unsummarized messages to return
         max_summaries: Maximum number of top-level summaries to include
         session: Session ID to filter context (optional)
         
@@ -266,7 +266,7 @@ async def get_context(
     """
     db = get_db()
     ctx = Context(db)
-    context = ctx.get(limit=limit, max_summaries=max_summaries, session=session)
+    context = ctx.get(max_summaries=max_summaries, session=session)
     
     # Get timestamps for the context metadata
     now = datetime.now(timezone.utc)

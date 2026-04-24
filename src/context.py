@@ -201,15 +201,14 @@ class Context:
             "memories_summarized": summary_result.get("memories_summarized", 0)
         }
     
-    def get(self, limit: int = 100, max_summaries: int = 3, session: str = None) -> list[dict]:
+    def get(self, max_summaries: int = 3, session: str = None) -> list[dict]:
         """
-        Get context for LLM: top summaries first, then unsummarized turns.
+        Get context for LLM: top summaries first, then all unsummarized turns.
         
         Summaries are fetched as the "top level" of the summary tree - summaries
         that have no parent summary pointing to them.
         
         Args:
-            limit: Maximum number of unsummarized messages to return
             max_summaries: Maximum number of top-level summaries to include
             session: Optional session ID to filter by
             
@@ -219,8 +218,8 @@ class Context:
         # Get top-level summaries (roots of the summary tree)
         summaries = self._get_top_summaries(session, max_summaries)
         
-        # Get unsummarized messages (filtered by session if provided)
-        unsummarized = self._get_unsummarized(limit, session)
+        # Get all unsummarized messages (filtered by session if provided)
+        unsummarized = self._get_unsummarized(session)
         
         # Build context: summaries first (oldest first), then unsummarized (most recent)
         context = []
@@ -482,8 +481,8 @@ class Context:
     
 
     
-    def _get_unsummarized(self, limit: int, session: str = None) -> list[dict]:
-        """Get unsummarized context memories."""
+    def _get_unsummarized(self, session: str = None) -> list[dict]:
+        """Get all unsummarized context memories."""
         # Build query with session filter if provided (property filter)
         query_parts = ["k:context"]
         if session:
@@ -511,7 +510,7 @@ class Context:
             })
         
         unsummarized.sort(key=lambda m: m["created_at"])
-        return unsummarized[-limit:]
+        return unsummarized
     
     def _get_by_level(self, level: int, session: str = None) -> list[dict]:
         """Get summaries at a specific level for hierarchical clustering.
