@@ -87,7 +87,6 @@ class AddContextRequest(BaseModel):
     session: str | None = None  # Optional session ID (stored as property)
     tool_call_id: str | None = None  # Optional tool call ID for tracing
     function: str | None = None  # Optional function name for tool results
-    max_live_messages: int | None = None  # Hard cap on unsummarized messages (force summary if exceeded)
 
 
 class GetContextRequest(BaseModel):
@@ -212,25 +211,24 @@ def _count_message_tokens(role: str, content: str) -> int:
 @app.post("/context")
 async def add_context(
     request: AddContextRequest,
-    min_cluster_size: int | None = Query(None, description="Min messages before summarization"),
+    trigger_limit: int | None = Query(None, description="Summarize when unsummarized count >= this"),
 ) -> dict:
     """Add a context message and auto-summarize if needed.
     
     Uses the Context class which handles:
     - Adding the message with context keyword and role
     - Token counting
-    - Auto-summarization when threshold is exceeded
-    - Force summarization when max_live_messages is exceeded
+    - Auto-summarization when unsummarized count >= trigger_limit
     
     Args:
         request: Context content and role
-        min_cluster_size: Override min messages before summarization (default 3)
+        trigger_limit: Override summarization trigger threshold (default from Context class: 40)
         
     Returns:
         Memory ID, role, token count, and summarization status
     """
     db = get_db()
-    ctx = Context(db, min_cluster_size=min_cluster_size or 3)
+    ctx = Context(db)
     result = ctx.add(
         request.role, 
         request.content, 
@@ -238,7 +236,7 @@ async def add_context(
         request.session, 
         request.tool_call_id, 
         request.function,
-        max_live_messages=request.max_live_messages
+        trigger_limit=trigger_limit
     )
     
     return result
