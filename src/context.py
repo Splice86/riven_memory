@@ -231,8 +231,8 @@ class Context:
         for summary in summaries:
             context.append({
                 "id": summary["id"],
-                "role": "summary",
-                "content": summary["content"],
+                "role": "assistant",  # Use "assistant" for summaries - "summary" is invalid for LLM APIs
+                "content": summary["content"],  # Already prefixed with "Summary:" when stored
                 "created_at": summary["created_at"],
                 "summary_level": summary.get("properties", {}).get("summary_level", "1")
             })
@@ -344,10 +344,12 @@ class Context:
             session = memories[0].get("properties", {}).get("session")
         
         # Estimate token count for the summary
-        summary_token_count = count_message_tokens("summary", summary_text)
+        # Prefix with "Summary:" so LLM knows this is a summary (since role is "assistant")
+        summary_with_prefix = f"Summary: {summary_text}"
+        summary_token_count = count_message_tokens("assistant", summary_with_prefix)
         
         summary_id = self.db.add_memory(
-            content=summary_text,
+            content=summary_with_prefix,
             keywords=["context", "summary"],
             properties={
                 "role": "summary",

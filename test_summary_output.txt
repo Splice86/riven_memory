@@ -1,0 +1,17 @@
+SUMMARIZATION TEST OUTPUT
+============================================================
+
+Session: test_summarize_20260424_011545
+Context limits: min_cluster_size=3
+
+
+============================================================
+SUMMARY (Level 1)
+Summarized 3 messages, ~0 tokens
+ID: 78, Created: 2026-04-24T01:15:53.538268+00:00
+============================================================
+
+Task cancellation in asyncio is cooperative—calling `task.cancel()` sets a `CancelledError` to be raised at the task's next await point rather than stopping execution immediately. To confirm cancellation, you should await the task and catch the exception. Memory leaks commonly stem from unfinished tasks, unawaited coroutines held by event loops, and circular references in dataclasses; using `asyncio.TaskGroup()` (Python 3.11+) handles automatic cleanup, while `weakref` can break circular references.
+
+`asyncio.gather()` runs coroutines concurrently and blocks until all complete, returning results in input order, while `asyncio.create_task()` schedules coroutines non-blocking in the background, returning a Task object for later awaiting. For error handling, `gather()` provides a `return_exceptions` parameter to prevent one failing task from crashing the entire batch.
+
